@@ -1,7 +1,7 @@
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
-  if (url.host === "p16-ad-sg.tiktokcdn.com") {
+  if (url.host.endsWith(".tiktokcdn.com")) {
     console.log("[SW] Intercept TikTok segment:", url.href);
     event.respondWith(handleSegmentSafe(event.request));
   } else {

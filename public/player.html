@@ -41,9 +41,23 @@
 
     <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
     <script>
-      function showPlayer() {
+      async function refreshLinks(key) {
+        try {
+          const resp = await fetch(`/refresh/${key}`, { method: "POST" });
+          if (!resp.ok) {
+            console.warn("Refresh failed", await resp.text());
+          }
+        } catch (err) {
+          console.warn("Refresh failed", err);
+        }
+      }
+
+      async function showPlayer() {
         const params = new URLSearchParams(window.location.search);
         const key = params.get("key");
+        if (!key) return;
+        await refreshLinks(key);
+
         const url = `/hls/${key}/master.m3u8`;
         const div = document.createElement("div");
         div.className = "player";

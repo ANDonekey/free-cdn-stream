@@ -31,7 +31,7 @@
       ><br /><br />
       <label
         >Segment duration (sec):
-        <input type="number" name="seg" value="10" min="2" max="10" /></label
+        <input type="number" name="seg" value="10" min="2" max="60" /></label
       ><br /><br />
       <button type="submit">Upload & Convert</button>
     </form>
@@ -46,11 +46,37 @@
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
         const data = new FormData(form);
-        result.innerHTML = "<p>Processing, please wait...</p>";
+        result.innerHTML = "<p>Preparing upload...</p>";
 
-        const res = await fetch("/upload", { method: "POST", body: data });
-        const html = await res.text();
-        result.innerHTML = html;
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/upload");
+
+        xhr.upload.addEventListener("progress", (event) => {
+          if (!event.lengthComputable) {
+            result.innerHTML = "<p>Uploading video...</p>";
+            return;
+          }
+          const percent = Math.round((event.loaded / event.total) * 100);
+          result.innerHTML = `<p>Uploading video... ${percent}%</p>`;
+        });
+
+        xhr.addEventListener("load", () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            result.innerHTML = xhr.responseText;
+          } else {
+            result.innerHTML = `<pre>${xhr.responseText || xhr.statusText}</pre>`;
+          }
+        });
+
+        xhr.addEventListener("error", () => {
+          result.innerHTML = "<p>Upload failed. Check the server log.</p>";
+        });
+
+        xhr.upload.addEventListener("load", () => {
+          result.innerHTML = "<p>Upload complete. Processing on server...</p>";
+        });
+
+        xhr.send(data);
       });
 
       function showPlayer(url) {

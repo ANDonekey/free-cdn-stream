@@ -1,8 +1,15 @@
 {
   "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "random:png": "node scripts/make-random-png.js",
+    "tiktok:share": "node scripts/tiktok-share.js",
+    "tiktok:test": "node scripts/tiktok-smoke-test.js"
+  },
   "dependencies": {
     "axios": "^1.13.1",
     "express": "^5.1.0",
+    "form-data": "^4.0.5",
     "mime": "^4.0.4",
     "multer": "^1.4.5-lts.1",
     "uuid": "^11.0.3"

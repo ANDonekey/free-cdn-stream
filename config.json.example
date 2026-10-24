@@ -1,7 +1,14 @@
 {
     "tiktok": {
         "org_id": "",
+        "aadvid": "",
         "cookie": "",
-        "orgin_link": "https://p16-ad-sg.tiktokcdn.com/origin/"
+        "orgin_link": "https://p16-ad-sg.tiktokcdn.com/origin/",
+        "share_to": [
+            {
+                "tenant_type": 10022,
+                "tenant_id": ""
+            }
+        ]
     }
 }

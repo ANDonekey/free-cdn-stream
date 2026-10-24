@@ -4,7 +4,7 @@ import path from "path";
 import zlib from "zlib";
 import crypto from "crypto";
 import { basenameNoExt, listFiles } from "./util.js";
-import { uploadToTiktok } from "./uploader.js";
+import { listMaterials, uploadToTiktok } from "./uploader.js";
 import appConfig from "./config.js";
 
 function crc32(bytes) {
@@ -271,9 +271,116 @@ export function replaceM3u8(dir, data) {
   const content = fs.readFileSync(m3u8, "utf8");
   const newContent = content.replace(
     data.segment,
-    appConfig.tiktok.orgin_link + data.imgURL
+    data.url || appConfig.tiktok.orgin_link + data.imgURL
   );
   fs.writeFileSync(m3u8, newContent, "utf8");
+}
+
+function materialNameForUpload(dir, item) {
+  if (item.materialName) return item.materialName;
+  if (item.png) return basenameNoExt(item.png);
+
+  const jobId = basenameNoExt(dir);
+  const segmentName = basenameNoExt(item.segment || "");
+  return `${jobId}${segmentName}`;
+}
+
+function rewriteM3u8SegmentUrls(dir, uploaded) {
+  const m3u8 = path.join(dir, "master.m3u8");
+  const lines = fs.readFileSync(m3u8, "utf8").split(/\r?\n/);
+  let segmentIndex = 0;
+
+  const rewritten = lines.map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return line;
+
+    const item = uploaded[segmentIndex++];
+    return item?.url || line;
+  });
+
+  fs.writeFileSync(m3u8, rewritten.join("\n"), "utf8");
+}
+
+async function listAllJobMaterials(jobId) {
+  const pageSize = 100;
+  const materials = [];
+  let page = 1;
+  let total = Infinity;
+
+  while (materials.length < total) {
+    const result = await listMaterials({
+      keyword: jobId,
+      isLifetime: true,
+      page,
+      pageSize,
+      mType: 2,
+    });
+
+    const items = result.material_infos || [];
+    materials.push(...items);
+    total = Number(result.total ?? materials.length);
+
+    if (items.length === 0) break;
+    page += 1;
+  }
+
+  return materials;
+}
+
+export async function refreshTiktokLinks(dir) {
+  const uploadedPath = path.join(dir, "uploaded.json");
+  if (!fs.existsSync(uploadedPath)) {
+    throw new Error(`uploaded.json not found in ${dir}`);
+  }
+
+  const uploaded = JSON.parse(fs.readFileSync(uploadedPath, "utf8"));
+  if (!Array.isArray(uploaded) || uploaded.length === 0) {
+    throw new Error(`uploaded.json has no uploaded segments: ${uploadedPath}`);
+  }
+
+  const jobId = basenameNoExt(dir);
+  const materials = await listAllJobMaterials(jobId);
+
+  const byName = new Map();
+  for (const material of materials) {
+    const info = material.base_info || material;
+    if (info.material_name && info.image_url) {
+      byName.set(info.material_name, info);
+    }
+  }
+
+  const refreshed = uploaded.map((item) => {
+    const materialName = materialNameForUpload(dir, item);
+    const info = byName.get(materialName);
+    return {
+      ...item,
+      materialName,
+      materialId: info?.material_id || item.materialId || "",
+      fileId: info?.file_id || item.fileId || "",
+      url: info?.image_url || item.url || "",
+      refreshedAt: info?.image_url
+        ? new Date().toISOString()
+        : item.refreshedAt,
+    };
+  });
+
+  const missing = refreshed.filter((item) => !item.url);
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing refreshed TikTok URLs for ${missing
+        .map((item) => item.materialName || item.segment)
+        .join(", ")}`
+    );
+  }
+
+  rewriteM3u8SegmentUrls(dir, refreshed);
+  fs.writeFileSync(uploadedPath, JSON.stringify(refreshed, null, 2), "utf8");
+
+  return {
+    total: refreshed.length,
+    refreshed: refreshed.filter((item) => item.url).length,
+    missing: 0,
+  };
 }
 
 export async function sendToTiktok(dir) {
@@ -288,6 +395,7 @@ export async function sendToTiktok(dir) {
     const data = {
       png: png.filePath,
       imgURL: imgURL,
+      materialName: basenameNoExt(png.filePath),
       segment: png.segment,
     };
     outData.push(data);

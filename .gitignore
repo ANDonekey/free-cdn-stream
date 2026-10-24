@@ -140,6 +140,15 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
 tmp/
+.tmp/
 bin/
 config.json
 .docker/
+
+# Local runtime output — may contain AES keys (enc.key) and upload metadata
+outputs/*
+!outputs/demo/
+
+# Network captures — contain live session cookies / auth tokens
+test/
+*.har

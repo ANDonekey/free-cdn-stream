@@ -7,7 +7,7 @@ import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
 import mime from "mime";
-import { sendToTiktok } from "./embed.js";
+import { refreshTiktokLinks, sendToTiktok } from "./embed.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,16 +16,21 @@ const ROOT = process.cwd();
 const PUBLIC_DIR = path.join(ROOT, "public");
 const OUT_DIR = path.join(ROOT, "outputs");
 const TMP_DIR = path.join(ROOT, "tmp");
-// window
-// const FF_PATH = path.join(process.cwd(), "bin", "ffmpeg.exe");
-// docker
-const FF_PATH = "/usr/bin/ffmpeg";
+const FF_PATH = path.join(ROOT, "bin", "ffmpeg.exe");
 
 for (const p of [OUT_DIR, TMP_DIR]) {
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
 }
 
 app.use(express.static(PUBLIC_DIR));
+app.use(express.json({ limit: "1mb" }));
+
+app.use((req, _res, next) => {
+  if (req.method === "POST" && req.path === "/upload") {
+    console.log(`[upload] request started from ${req.ip}`);
+  }
+  next();
+});
 
 const upload = multer({
   dest: TMP_DIR,
@@ -117,16 +122,42 @@ app.get("/hls/:jobId/:file", async (req, res) => {
   }
 });
 
+app.post("/refresh/:jobId", async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    if (!/^[a-f0-9-]{36}$/i.test(jobId)) {
+      return res.status(400).json({ ok: false, error: "Invalid jobId" });
+    }
+
+    const jobDir = path.join(OUT_DIR, jobId);
+    if (!fs.existsSync(jobDir)) {
+      return res.status(404).json({ ok: false, error: "Job not found" });
+    }
+
+    console.log(`[refresh:${jobId}] refreshing TikTok CDN URLs...`);
+    const result = await refreshTiktokLinks(jobDir);
+    console.log(`[refresh:${jobId}] refreshed ${result.total} segment URLs`);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Upload & convert
 app.post("/upload", upload.single("video"), async (req, res) => {
   const inputFile = req.file;
-  const seg = Math.max(2, Math.min(10, Number(req.body.seg || 4)));
+  const seg = Math.max(2, Math.min(60, Number(req.body.seg || 4)));
 
   if (!inputFile) return res.status(400).send("No file uploaded");
+  console.log(
+    `[upload] received ${inputFile.originalname} (${inputFile.size} bytes)`
+  );
 
   const jobId = uuidv4();
   const jobDir = path.join(OUT_DIR, jobId);
   await fsp.mkdir(jobDir, { recursive: true });
+  console.log(`[upload] job ${jobId} created`);
 
   const key = randomBytes(16);
   const token = randomBytes(16);
@@ -177,8 +208,12 @@ app.post("/upload", upload.single("video"), async (req, res) => {
   ];
 
   try {
+    console.log(`[upload:${jobId}] converting video with ffmpeg...`);
     await spawnFFmpeg(args);
+    console.log(`[upload:${jobId}] ffmpeg conversion completed`);
+    console.log(`[upload:${jobId}] converting segments to PNG and uploading...`);
     await sendToTiktok(jobDir);
+    console.log(`[upload:${jobId}] upload completed`);
 
     fsp.unlink(inputFile.path).catch(() => {});
 
